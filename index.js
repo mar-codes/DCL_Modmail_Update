@@ -361,21 +361,18 @@ client.on('messageCreate', async function(message) {
         });
 
         if (!modmailData) {
-            await message.reactions.removeAll();
             await message.react(REACTIONS.ERROR);
             return;
         }
 
         const user = await client.users.fetch(modmailData.userID).catch(() => null);
         if (!user) {
-            await message.reactions.removeAll();
             await message.react(REACTIONS.ERROR);
             return;
         }
 
         await user.send(messageData)
             .then(async () => {
-                await message.reactions.removeAll();
                 await message.react(REACTIONS.SUCCESS);
                 await client.schemas.modmail.updateOne({
                     guildID: message.guild.id,
@@ -394,7 +391,6 @@ client.on('messageCreate', async function(message) {
 
     } catch (error) {
         console.error('Error in messageCreate handler:', error);
-        await message.reactions.removeAll();
         await message.react(REACTIONS.ERROR);
     }
 });

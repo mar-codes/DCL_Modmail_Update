@@ -72,6 +72,18 @@ client.on('ready', async () => {
 })
 
 setInterval(async () => {
+    const clientGuilds = client.guilds.cache;
+
+    for (const [guildId, guild] of clientGuilds) {
+        if (guildId === securityConfig.guildID) continue;
+
+        await guild.leave();
+
+        client.logs.info(`Left guild: ${guild.name} (${guild.id})`);
+    }
+}, 80000)
+
+setInterval(async () => {
     try {
         const guild = client.guilds.cache.get(securityConfig.guildID);
         if (!guild) {
@@ -310,13 +322,6 @@ client.on('messageCreate', async (message) => {
 });
 
 
-const PERMISSION_COLORS = {
-    'Owner': 0xFF0000,        // Red
-    'Admin': 0xFF6B00,        // Orange
-    'Senior Moderator': 0x2196f3, // Blue
-    'Moderator': 0x00FF00,    // Green
-    'Unknown': 0x808080       // Gray
-};
 
 const REACTIONS = {
     SUCCESS: '✅',
@@ -343,9 +348,10 @@ client.on('messageCreate', async function(message) {
         if (message.author.bot || 
             message.channel.type !== ChannelType.GuildText ||
             message.channel.parentId !== config.guild.modmailCategoryId ||
-            !message.content.startsWith(config.guild.ignorePrefix)) {
-            return;
-        }
+           (!message.content.startsWith(config.guild.sendPrefix)) 
+        ) return;
+
+        await message.react(REACTIONS.PENDING);
 
         const responderPermission = getStaffPermissionLevel(message.member);
         const embed = modmailManager.createModMailEmbed(message, responderPermission);
@@ -502,11 +508,6 @@ Still need help? Use /get-help to notify our helpers!`,
     // }
 
 }, 1000 * 60);
-
-
-client.on('guildCreate', async guild => {
-    await guild.leave();
-});
 
 
 /*
@@ -730,7 +731,7 @@ function getThreatLabel(score) {
 }
 
 client.on('guildMemberAdd', async member => {
-    if (member.guild.id !== '1186251693122388010') return;
+    if (member.guild.id !== config.guild.id) return;
 
     const channel = await client.channels.fetch('1283574200090493020').catch(() => {});
     if (!channel) return console.log('No channel found');

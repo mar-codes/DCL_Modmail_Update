@@ -210,7 +210,7 @@ class ModmailManager {
             dateStyle: isToday ? undefined : 'short'
         });
 
-        let description = message.content?.replace(/^\.+/, '') || '*No message content*';
+        let description = message.content?.replace(/^\.+ */, '') || '*No message content*';
         if (description.length > 4000) {
             description = description.slice(0, 3997) + '...';
         }

@@ -1,108 +1,156 @@
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 
-function convertTimestamp(timestamp) {
-    if (typeof timestamp !== 'number') throw new TypeError(`Expected a number, got ${typeof number}`);
-    
-    // Date.now() -> 'in 5 mintues and 26 seconds'
+const CONFIG = {
+    MAX_HELPERS: 3,
+    COOLDOWN_MINUTES: 10,
 
-    const time = Math.floor( (timestamp - Date.now()) / 1000 );
-    const minutes = Math.floor(time / 60);
-    const seconds = time % 60;
+    ROLES: {
+        '1330744743008665600': '1330742740107137085', // MongoDB Helper
+        '1330744731394637934': '1330742771128205392', // SQL Helper
+        '1330744479757369364': '1330743018688483409', // HTML Helper
+        '1330744505464389705': '1330742717688578069'  // JS Helper
+    },
 
-    let remainingTimeString = '';
-    if (minutes > 0) {
-        remainingTimeString += `${minutes} minute${minutes > 1 ? 's' : ''} and `;
+    DEFAULT_ROLE: '1330742717688578069',
+
+    COLORS: {
+        PRIMARY: 0x5865F2,    // Discord blue
+        SUCCESS: 0x57F287,    // Green
+        ERROR: 0xED4245,      // Red
+        WARNING: 0xFEE75C     // Yellow
+    },
+
+    PING_MESSAGES: [
+        "**Support Request** • {user} would appreciate assistance with their problem.",
+        "**Help Needed** • {user} is seeking technical guidance from our support team.",
+        "**New Request** • {user} would value your expertise on this matter.",
+        "**Assistance Needed** • {user} has an problem for our technical team.",
+        "**Support Alert** • {user} is looking for technical assistance."
+    ],
+
+    MESSAGES: {
+        ERROR_NO_HELPERS: '```❌ Currently, no helpers are available to assist. Please try again shortly, or consider posting in our general help channels.```',
+        ERROR_COOLDOWN: '```⏳ A cooldown is active. You can request help again in {TIME}.```',
+        SUCCESS: '```✅ Your help request has been sent successfully. Our helpers have been notified.```',
+        ERROR_WRONG_CHANNEL: '```❌ This command is designed for help threads only. Please use this command within an appropriate help thread.```',
+        ERROR_GENERIC: '```❌ An error occurred while processing your request. Please try again.```',
+        FOOTER: 'Technical Support Team • Empowering Through Knowledge'
     }
-    remainingTimeString += `${seconds} second${seconds > 1 ? 's' : ''}`;
+};
 
-    return remainingTimeString;
+function getRandomHelpers(members, max) {
+    return members
+        .sort(() => Math.random() - 0.5)
+        .slice(0, Math.min(max, members.length));
 }
 
+function formatTimeRemaining(timestamp) {
+    const seconds = Math.floor((timestamp - Date.now()) / 1000);
+    const minutes = Math.floor(seconds / 60);
+    const remainingSeconds = seconds % 60;
+    
+    if (minutes > 0) {
+        return `${minutes}m ${remainingSeconds}s`;
+    }
+    return `${remainingSeconds}s`;
+}
+
+function getRandomPingMessage(username) {
+    const randomMessage = CONFIG.PING_MESSAGES[Math.floor(Math.random() * CONFIG.PING_MESSAGES.length)];
+    return randomMessage.replace('{user}', username);
+}
+
+function formatHelperPings(helpers) {
+    return [
+        "**Available Helpers:**",
+        ...helpers.map(h => `• <@${h.id}>`)
+    ].join('\n');
+}
 
 module.exports = {
     data: new SlashCommandBuilder()
         .setName('get-help')
-        .setDescription('Ping a Coding Helper.'),
-    execute: async function(interaction, client) {
+        .setDescription('Request technical assistance from our helper team.'),
 
-        await interaction.deferReply({ ephemeral: true }).catch( () => {} );
+    async execute(interaction, client) {
+        try {
+            await interaction.deferReply({ ephemeral: true });
 
-        if (interaction.channel.type !== 11) {
-            return await interaction.editReply({
-                content: '/get-help can only be used in a help channel - Create a post to get started!'
-            });
-        }
-
-        if (interaction.channel.createdTimestamp + 1000 * 60 * 10 > Date.now()) {
-            const time = convertTimestamp(interaction.channel.createdTimestamp + 1000 * 60 * 10);
-
-            return await interaction.editReply({
-                content: `You must wait ${time} before using this command - Hang tight while we get to you!`
-            });
-        }
-
-        const timeoutData = client.cooldowns.get(`${interaction.user.id}-get-help`);
-        if (timeoutData) {
-            const time = convertTimestamp(timeoutData);
-
-            return await interaction.editReply({
-                content: `
-⚠️ You are on cooldown for ${time}.
-The coding helpers are doing their best to answer your request, so please be patient while they help you!`
-            });
-        }
-
-        const button = client.buttons.get('get-help');
-
-        // JS, PY, HTML
-        const roleID = client.config.HELP_ROLES[interaction.channel.parentId] ?? null;
-        if (roleID !== null) {
-            return await button.execute(interaction, client, [ roleID ]);
-        }
-
-        if (interaction.channel.parentId === '1184616712142860339') {
-            // Database Help (mongo + sql)
-            const tags = {
-                '1184616869961932891': '1187083774828216382', // Mongo
-                '1184617008176832512': '1187083830474059866', // SQL
-                // '1184626899713007767' // Other: Can be anything, no role ID
+            if (interaction.channel.type !== 11) {
+                return await interaction.editReply({ 
+                    content: CONFIG.MESSAGES.ERROR_WRONG_CHANNEL 
+                });
             }
 
-            const channelTags = interaction.channel.appliedTags;
+            const creationCooldown = interaction.channel.createdTimestamp + (1000 * 60 * CONFIG.COOLDOWN_MINUTES);
+            if (creationCooldown > Date.now()) {
+                const timeLeft = formatTimeRemaining(creationCooldown);
+                return await interaction.editReply({
+                    content: `Please wait ${timeLeft} before pinging helpers.`
+                });
+            }
 
-            for (const [ tagID, roleID ] of Object.entries(tags)) {
-                if (channelTags.includes(tagID)) {
-                    return await button.execute(interaction, client, [ roleID ]);
+            const cooldownKey = `${interaction.user.id}-get-help`;
+            const cooldownTime = client.cooldowns.get(cooldownKey);
+            
+            if (cooldownTime && cooldownTime > Date.now()) {
+                return await interaction.editReply({
+                    content: CONFIG.MESSAGES.ERROR_COOLDOWN.replace('{TIME}', formatTimeRemaining(cooldownTime))
+                });
+            }
+
+            const roleIDs = interaction.channel.appliedTags
+                .map(tag => CONFIG.ROLES[tag])
+                .filter(id => id);
+
+            if (roleIDs.length === 0) {
+                roleIDs.push(CONFIG.DEFAULT_ROLE);
+            }
+
+            const onlineHelpers = new Set();
+            for (const roleID of roleIDs) {
+                const role = await interaction.guild.roles.fetch(roleID);
+                if (!role) continue;
+
+                role.members
+                    .filter(m => m.presence?.status === 'online' || m.presence?.status === 'idle' || m.presence?.status === 'dnd')
+                    .forEach(m => onlineHelpers.add(m));
+            }
+
+            if (onlineHelpers.size === 0) {
+                return await interaction.editReply({
+                    content: CONFIG.MESSAGES.ERROR_NO_HELPERS
+                });
+            }
+
+            const selectedHelpers = getRandomHelpers([...onlineHelpers], CONFIG.MAX_HELPERS);
+            
+            const mainMessage = [
+                getRandomPingMessage(interaction.member.displayName),
+                '',
+                formatHelperPings(selectedHelpers),
+                '',
+            ].join('\n');
+
+            const helpMessage = await interaction.channel.send({
+                content: mainMessage,
+                allowedMentions: { 
+                    users: selectedHelpers.map(h => h.id),
                 }
-            }
-
-            // Ping both roles
-            return await button.execute(interaction, client, Object.values(tags));
-        }
-                
-        if (interaction.channel.parentId === '1090696098064113764') { // General questions, can be anything
-
-            const tags = {
-                // '1090696466625998948': [ '1069789755501445150' ], // Python
-                // '1187088848438689832': // Other
-                '1090696496074195084': [ '1108768042873278686' ], // HTML
-                '1090696445109227633': [ '1082346384876900452' ], // Javascript
-                '1187088784286814228': [ '1187083774828216382', '1187083830474059866' ] // Mongo + SQL
-            }
-
-            const channelTags = interaction.channel.appliedTags;
-
-            for (const [ tagIDs, roleID ] of Object.entries(tags)) {
-                if (channelTags.some(tag => tagIDs.includes(tag))) {
-                    return await button.execute(interaction, client, roleID);
-                }
-            }
-
-            return await interaction.editReply({
-                content: 'It seems we don\'t have a team for your issue, we apologize for the inconvenience.',
             });
 
-        }
 
+            client.cooldowns.set(cooldownKey, Date.now() + (1000 * 60 * CONFIG.COOLDOWN_MINUTES));
+
+            await interaction.editReply({
+                content: CONFIG.MESSAGES.SUCCESS
+            });
+
+        } catch (error) {
+            console.error('Error in get-help command:', error);
+            await interaction.editReply({
+                content: CONFIG.MESSAGES.ERROR_GENERIC
+            });
+        }
     }
-}
+};

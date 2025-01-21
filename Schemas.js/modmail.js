@@ -1,20 +1,16 @@
 const { model, Schema } = require("mongoose");
+const { created } = require("../utils/Logs");
 
-const modSchema = new Schema({
-    guildID: String,
-    userID: String,
-    channelID: String,
-    createdTimestamp: Number,
-    closedTimestamp: Number,
-    lastMessageTimestamp: Number,
-    staff: {
-        type: Boolean,
-        default: false
-    },
-    closed: {
-        type: Boolean,
-        default: false
-    }
+const modmailSchema = new Schema({
+    guildID: { type: String, required: true },
+    userID: { type: String, required: true },
+    channelID: { type: String, required: true },
+    modmailID: { type: String, required: true },
+    closed: { type: Boolean, default: false },
+    createdTimestamp: { type: Number, default: Date.now },
+    closedTimestamp: { type: Number, default: null },
+    messageCount: { type: Number, default: 0 },
+    lastMessageTimestamp: { type: Number, default: Date.now }
 });
 
-module.exports = model("modmail", modSchema);
+module.exports = model("modmail", modmailSchema);

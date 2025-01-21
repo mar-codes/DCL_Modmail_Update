@@ -104,6 +104,18 @@ module.exports = {
 				embeds: [],
 				files: [transcript]
 			});
+		} else if (action === "blacklist") {
+			const blacklistSchema = require('../Schemas.js/blacklist');
+			blacklistSchema.create({
+				guildID: guild.id,
+				userID: user.id,
+				reason: 'Blacklisted from modmail',
+				blacklistedBy: interaction.user.id
+			})
+
+			await interaction.reply({
+				content: `User has been blacklisted from modmail!`
+			});
 		}
 	}
 };

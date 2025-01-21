@@ -1,5 +1,7 @@
 const https = require('node:https');
 const crypto = require('node:crypto');
+const BlacklistSchema = require('./Schemas.js/blacklist.js');
+const securityConfig = require('./security/config.json')
 require('./utils/ProcessHandlers.js')();
 
 const {
@@ -29,13 +31,13 @@ client.cache = {
     purgeChannels: new Map(),
     threadClose: new Map(),
     bugReport: new Map(),
-    applications: new Map()
+    applications: new Map(),
+    bannedUsers: new Map()
 }
 client.cooldowns = new Map(); // string: number
 client.config = require('./config.json');
 client.logs = require('./utils/Logs.js');
 client.schemas = require('./utils/SchemasLoader.js');
-
 client.topics = require('./utils/LoadTopics.js')();
 
 require('./utils/ComponentLoader.js')(client);
@@ -68,6 +70,44 @@ client.on('ready', async () => {
 
     client.logs.success(`Logged in as ${client.user.tag}!`);
 })
+
+setInterval(async () => {
+    try {
+        const guild = client.guilds.cache.get(securityConfig.guildID);
+        if (!guild) {
+            return;
+        }
+
+        const currentBans = await guild.bans.fetch();
+        const currentBanIds = new Set(currentBans.keys());
+
+        const databaseBans = await client.schemas.bannedAccs.find({ guildID: guild.id });
+
+        for (const dbBan of databaseBans) {
+            if (!currentBanIds.has(dbBan.userID)) {
+                await client.schemas.bannedAccs.deleteOne({ userID: dbBan.userID });
+                console.log(`[Ban Removed] ${dbBan.username} (${dbBan.userID})`);
+            }
+        }
+
+        for (const [id, ban] of currentBans) {
+            const existingBan = await client.schemas.bannedAccs.findOne({ userID: id });
+            if (existingBan) continue;
+
+            const bannedUser = new client.schemas.bannedAccs({
+                userID: id,
+                guildID: guild.id,
+                username: ban.user.username,
+                reason: ban.reason || 'No reason provided',
+                bannedTimestamp: Date.now()
+            });
+
+            await bannedUser.save();
+        }
+    } catch (error) {
+        console.error('Error in ban tracking:', error);
+    }
+}, 60000);
 
 async function InteractionHandler(interaction, type) {
 
@@ -115,7 +155,6 @@ async function InteractionHandler(interaction, type) {
             ephemeral: true
         }).catch( () => {} );
     }
-
 }
 
 client.on('interactionCreate', async function(interaction) {
@@ -184,194 +223,182 @@ client.on('guildMemberAdd', async member => {
     }
 });
 
+const Manager = require('./modmail-services/modmail-manager.js');
+const ModmailSchema = require('./Schemas.js/modmail.js');
+const modmailManager = new Manager(client);
+const config = require('./modmail-services/config.js');
 
-client.on('messageCreate', async function (message) {
-    if (message.author.bot) return;
-    if (message.channel.type !== ChannelType.DM) return;
-    if (message.author.id === client.user.id) return;
+client.on('messageCreate', async (message) => {
+    if (message.author.bot || 
+        message.channel.type !== ChannelType.DM || 
+        message.author.id === client.user.id) return;
 
-    /*
-    let modSchema = new Schema({
-        guildID: String,
-        userID: String,
-        channelID: String,
-        createdTimestamp: Number,
-        lastMessageTimestamp: Number,
-        closed: Boolean
-    })
-    */
-
-    const modmailData = await client.schemas.modmail.findOne({
-        guildID: '970775928596746290',
-        userID: message.author.id,
-        closed: false
-    });
-
-    const embed = {
-        author: {
-            name: `${message.author.globalName || message.author.username} (${message.author.id})`,
-            iconURL: message.author.displayAvatarURL({ dynamic: true })
-        },
-        description: `
-${message.content ?? ''}
-${message.attachments.map(attachment => attachment.url).join('\n') ?? ''}`.trim(),
-        color: 0x2196f3,
-        timestamp: new Date()
-    }
-
-    const sticker = message.stickers.first();
-    if (sticker) {
-        embed.image = { url: sticker.url }
-    }
-
-    const messageData = {
-        embeds: [embed]
-    }
-
-    if (modmailData) {
-        const channel = await client.channels.fetch(modmailData.channelID).catch( () => {} );
-        if (!channel) {
-            return message.reply({ content: `Something went wrong - Please notify @musicmaker if you see this!` });
-        }
-
-        try {
-            await channel.send(messageData);
-            await message.react('🗳️');
-        } catch (error) {
-            console.log(error.stack);
-            await message.react('❌').catch( () => {} );
-        }
-        return;
-    }
     try {
-        const guild = await client.guilds.fetch('970775928596746290').catch( () => {} );
-        if (!guild) throw new Error('Guild data not found, aborting...');
+        const isBlacklisted = await modmailManager.isBlacklisted(message.author.id);
+        if (isBlacklisted) {
+            return message.reply({ 
+                content: "You have been blacklisted from using the modmail system." 
+            });
+        }
 
-        const category = await guild.channels.fetch('1025792195564945418').catch( () => {} );
-        if (!category) throw new Error('Category data not found, aborting...');
-
-        const channel = await guild.channels.create({
-            name: message.author.username,
-            parent: category.id,
-            type: 0
-        });
-        if (!channel) throw new Error('Channel could not be created, aborting...');
-        
-        await client.schemas.modmail.create({
-            guildID: guild.id,
+        const modmailData = await ModmailSchema.findOne({
+            guildID: config.guild.id,
             userID: message.author.id,
-            channelID: channel.id,
-            createdTimestamp: Date.now(),
+            closed: false
         });
 
-        const buttons = {
-            type: 1,
-            components: [
-                {
-                    type: 2,
-                    label: 'Close Modmail',
-                    style: 4,
-                    custom_id: `modmail_close_${guild.id}_${message.author.id}`,
-                    emoji: '🔒'
-                },
-                {
-                    type: 2,
-                    label: 'Export Transcript',
-                    style: 2,
-                    custom_id: `modmail_transcript_${guild.id}_${message.author.id}`,
-                    emoji: '📜'
-                }
-            ]
+        const guild = await client.guilds.fetch(config.guild.id).catch(() => null);
+        const member = guild ? await guild.members.fetch(message.author.id).catch(() => null) : null;
+
+        const embed = modmailManager.createUserEmbed(message, member);
+        const messageData = { embeds: [embed] };
+
+        if (modmailData) {
+            const channel = await client.channels.fetch(modmailData.channelID);
+            const sentMessage = await channel.send(messageData);
+            await message.react(config.emojis.success);
+            modmailManager.updateUserStatus(channel, message.author.id, sentMessage.id);
+        } else {
+            const category = await guild.channels.fetch(config.guild.modmailCategoryId).catch(() => null);
+            if (!category) throw new Error('Category not found');
+
+            const channel = await guild.channels.create({
+                name: message.author.username,
+                parent: category.id,
+                type: 0
+            });
+
+            await ModmailSchema.create({
+                guildID: guild.id,
+                userID: message.author.id,
+                channelID: channel.id,
+                createdTimestamp: Date.now(),
+                modmailID: Date.now().toString(),
+            });
+
+            const sentMessage = await channel.send({
+                ...messageData,
+                components: [modmailManager.createButtons(guild.id, message.author.id, true)]
+            });
+
+            await message.author.send({
+                embeds: [modmailManager.createTicketEmbed()],
+                components: [modmailManager.createButtons(guild.id, message.author.id)]
+            });
+
+            await message.react(config.emojis.success);
+            modmailManager.updateUserStatus(channel, message.author.id, sentMessage.id);
         }
 
-        await channel.send( Object.assign(messageData, { components: [buttons] }) );
-
-        const replyEmbed = {
-            title: 'Modmail Created',
-            description: `
-A new modmail has been opened, please be patient while we get to you!
-While you wait, please detail your problem, screenshots are always appreciated.
-
-**Note** : We *do not* provide help with code within modmail, please refer to the forums`,
-            color: 0x2196f3,
-            timestamp: new Date()
-        }
-
-        await message.author.send({
-            embeds: [replyEmbed],
-            components: [buttons]
-        });
-
-        await message.react('🗳️');
+        await ModmailSchema.updateOne(
+            {
+                guildID: config.guild.id,
+                userID: message.author.id,
+                closed: false
+            },
+            {
+                lastMessageTimestamp: Date.now()
+            }
+        );
     } catch (error) {
-        console.log(error.stack);
-        await message.react('❌').catch( () => {} );
-        return message.author.send({ content: `Something went wrong - Please notify @musicmaker if you see this!` }).catch( () => {} );
+        console.error('ModMail Error:', error);
+        await message.react(config.emojis.error).catch(() => {});
+        await message.author.send({ 
+            content: `Something went wrong - Please notify @musicmaker if you see this! Or @gh0st.dev.` 
+        }).catch(() => {});
     }
-
-    await client.schemas.modmail.updateOne({
-        guildID: '970775928596746290',
-        userID: message.author.id,
-        closed: false
-    }, {
-        lastMessageTimestamp: Date.now()
-    });
-
 });
 
 
+const PERMISSION_COLORS = {
+    'Owner': 0xFF0000,        // Red
+    'Admin': 0xFF6B00,        // Orange
+    'Senior Moderator': 0x2196f3, // Blue
+    'Moderator': 0x00FF00,    // Green
+    'Unknown': 0x808080       // Gray
+};
+
+const REACTIONS = {
+    SUCCESS: '✅',
+    ERROR: '❌',
+    PENDING: '⏳'
+};
+
+function getStaffPermissionLevel(member) {
+    const staffRoles = [
+        { role: config.staffRoles.owner, level: 'Owner' },
+        { role: config.staffRoles.admin, level: 'Admin' },
+        { role: config.staffRoles.seniormoderator, level: 'Senior Moderator' },
+        { role: config.staffRoles.moderator, level: 'Moderator' }
+    ];
+
+    for (const { role, level } of staffRoles) {
+        if (member.roles.cache.has(role)) return level;
+    }
+    return 'Unknown';
+}
+
 client.on('messageCreate', async function(message) {
-    if (message.author.bot) return;
-    if (message.channel.type !== ChannelType.GuildText) return;
-    if (message.channel.parentId !== '1025792195564945418') return;
-
-    const embed = {
-        author: {
-            name: `${message.author.globalName || message.author.username} (${message.author.id})`,
-            iconURL: message.author.displayAvatarURL({ dynamic: true })
-        },
-        description: message.content || '',
-        image: null,
-        color: 0x2196f3,
-        timestamp: new Date()
-    }
-
-    const sticker = message.stickers.first();
-    if (sticker) {
-        embed.image = { url: sticker.url }
-    }
-
-    const messageData = {
-        embeds: [embed],
-        content: message.attachments.map(attachment => attachment.url).join('\n') || '',
-    }
-
-    const modmailData = await client.schemas.modmail.findOne({
-        guildID: message.guild.id,
-        channelID: message.channel.id,
-        closed: false
-    });
-
-    if (modmailData) {
-        const user = client.users.cache.get(modmailData.userID);
-        if (!user) return;
-
-        try {
-            await user.send(messageData);
-            await message.react('🗳️');
-        } catch (error) {
-            await message.react('❌').catch( () => {} );
+    try {
+        if (message.author.bot || 
+            message.channel.type !== ChannelType.GuildText ||
+            message.channel.parentId !== config.guild.modmailCategoryId ||
+            message.content.startsWith(config.guild.ignorePrefix)) {
+            return;
         }
+
+        await message.react(REACTIONS.PENDING);
+
+        const responderPermission = getStaffPermissionLevel(message.member);
+        const embed = modmailManager.createModMailEmbed(message, responderPermission);
+
+        const messageData = {
+            embeds: [embed],
+        };
+
+        const modmailData = await client.schemas.modmail.findOne({
+            guildID: message.guild.id,
+            channelID: message.channel.id,
+            closed: false
+        });
+
+        if (!modmailData) {
+            await message.reactions.removeAll();
+            await message.react(REACTIONS.ERROR);
+            return;
+        }
+
+        const user = await client.users.fetch(modmailData.userID).catch(() => null);
+        if (!user) {
+            await message.reactions.removeAll();
+            await message.react(REACTIONS.ERROR);
+            return;
+        }
+
+        await user.send(messageData)
+            .then(async () => {
+                await message.reactions.removeAll();
+                await message.react(REACTIONS.SUCCESS);
+                await client.schemas.modmail.updateOne({
+                    guildID: message.guild.id,
+                    userID: modmailData.userID,
+                    closed: false
+                }, {
+                    lastMessageTimestamp: Date.now(),
+                    $inc: { messageCount: 1 }
+                });
+            })
+            .catch(async (error) => {
+                console.error('Error sending message to user:', error);
+                await message.reactions.removeAll();
+                await message.react(REACTIONS.ERROR);
+            });
+
+    } catch (error) {
+        console.error('Error in messageCreate handler:', error);
+        await message.reactions.removeAll();
+        await message.react(REACTIONS.ERROR);
     }
-
-    await client.schemas.modmail.updateOne({
-        guildID: message.guild.id,
-        userID: message.author.id,
-        closed: false
-    }, {
-        lastMessageTimestamp: Date.now()
-    });
-
 });
 
 
@@ -494,64 +521,295 @@ Extreme, account age < 1 week
 WTF, account age < 1 day
 */
 
-function getThreatColor(timestamp) {
-    if (typeof timestamp !== 'number') throw new TypeError('Timestamp must be a number');
+const stringSimilarity = require('string-similarity');
+
+// Constants for better maintainability
+const THREAT_LEVELS = {
+    SAFE: { score: 0, color: 0x00ffff, label: 'Safe' },
+    SUSCEPTIBLE: { score: 20, color: 0x00ff00, label: 'Susceptible' },
+    SUSPICIOUS: { score: 40, color: 0xffff00, label: 'Suspicious' },
+    DANGEROUS: { score: 60, color: 0xff6600, label: 'Dangerous' },
+    EXTREME: { score: 80, color: 0xff0000, label: 'Extreme' },
+    CRITICAL: { score: 90, color: 0x000000, label: 'Critical' }
+};
+
+// Suspicious username patterns
+const USERNAME_PATTERNS = {
+    ALT_INDICATORS: {
+        patterns: [
+            /\b(alt|alternative)\b/i,
+            /[aA4@][lL1][tT]/,  // Matches variations like "4lt", "a1t", "@lt", etc.
+            /\b(sub|backup|spare|dummy|fake|throw)\b/i,
+            /\b(new|2nd|secondary|another)\b/i
+        ],
+        score: 40,
+        reason: "⚠️ Username suggests alternative account"
+    },
+    SUSPICIOUS_CONTENT: {
+        patterns: [
+            /\b(bot|spam|raid|nuke|hack)\b/i,
+            /[0-9]{4,}/,
+            /[!@#$%^&*()]{3,}/,
+            /discord\.gg/i,
+            /\b(free|nitro|giveaway)\b/i
+        ],
+        score: 15,
+        reason: "⚠️ Username contains suspicious patterns"
+    },
+    IMPERSONATION: {
+        patterns: [
+            /\b(admin|mod|staff|owner)\b/i,
+            /\b(official|real|verified)\b/i,
+            /\b(discord|system)\b/i
+        ],
+        score: 25,
+        reason: "🎭 Potential impersonation attempt"
+    },
+    EVASION: {
+        patterns: [
+            /(.)\1{4,}/,  // Repeated characters
+            /[il|]{4,}/i,  // Common evasion characters
+            /[\u200B-\u200D\uFEFF]/,  // Zero-width spaces
+            /[^\x00-\x7F]+/  // Non-ASCII characters
+        ],
+        score: 30,
+        reason: "🎯 Possible filter evasion attempt"
+    }
+};
+
+function getThreatColor(score) {
+    if (score >= THREAT_LEVELS.CRITICAL.score) return THREAT_LEVELS.CRITICAL.color;
+    if (score >= THREAT_LEVELS.EXTREME.score) return THREAT_LEVELS.EXTREME.color;
+    if (score >= THREAT_LEVELS.DANGEROUS.score) return THREAT_LEVELS.DANGEROUS.color;
+    if (score >= THREAT_LEVELS.SUSPICIOUS.score) return THREAT_LEVELS.SUSPICIOUS.color;
+    if (score >= THREAT_LEVELS.SUSCEPTIBLE.score) return THREAT_LEVELS.SUSCEPTIBLE.color;
+    return THREAT_LEVELS.SAFE.color;
+}
+
+function analyzeUsername(username) {
+    let reasons = [];
+    let score = 0;
+
+    for (const [category, data] of Object.entries(USERNAME_PATTERNS)) {
+        for (const pattern of data.patterns) {
+            if (pattern.test(username)) {
+                score += data.score;
+                reasons.push(data.reason);
+                break;
+            }
+        }
+    }
+
+    if (username.length < 4) {
+        score += 10;
+        reasons.push("📏 Suspiciously short username");
+    }
+
+    const randomLooking = /^[a-zA-Z0-9]{8,}$/.test(username) && 
+                         !/^[a-zA-Z]+$/.test(username) && 
+                         !/^[0-9]+$/.test(username);
+    if (randomLooking) {
+        score += 15;
+        reasons.push("🎲 Random-looking username pattern");
+    }
+
+    return { score, reasons };
+}
+
+async function calculateThreatLevel(member, bannedUsers) {
+    let threatScore = 0;
+    let threatReasons = [];
+
+    const usernameAnalysis = analyzeUsername(member.user.username);
+    threatScore += usernameAnalysis.score;
+    threatReasons.push(...usernameAnalysis.reasons);
+
+    const accountAge = Date.now() - member.user.createdTimestamp;
+    const daysOld = Math.floor(accountAge / (1000 * 60 * 60 * 24));
+    const hoursOld = Math.floor(accountAge / (1000 * 60 * 60));
     
-    const now = Date.now();
-    const diff = now - timestamp;
+    if (hoursOld < 1) {
+        threatScore += 70;
+        threatReasons.push("⚠️ Account created less than 1 hour ago");
+    } else if (hoursOld < 24) {
+        threatScore += 50;
+        threatReasons.push(`⚠️ Account created ${hoursOld} hours ago`);
+    } else if (daysOld < 7) {
+        threatScore += 40;
+        threatReasons.push("⚠️ Account less than 7 days old");
+    } else if (daysOld < 30) {
+        threatScore += 20;
+        threatReasons.push("⚡ Account less than 30 days old");
+    }
 
-    const oneDay = 1000 * 60 * 60 * 24;
-    const oneWeek = oneDay * 7;
-    const oneMonth = oneDay * 30;
+    let similarityMatches = [];
+    for (const [id, banData] of bannedUsers) {
+        const usernames = [member.user.username, ...(member.user.previousUsernames || [])];
+        const bannedUsernames = [banData.username, ...(banData.previousUsernames || [])];
 
-    // wtf
-    if (diff < oneDay) return 0x000000;
+        for (const currentUsername of usernames) {
+            for (const bannedUsername of bannedUsernames) {
+                const similarity = stringSimilarity.compareTwoStrings(
+                    currentUsername.toLowerCase(),
+                    bannedUsername.toLowerCase()
+                );
+                
+                if (similarity > 0.8) {
+                    threatScore += 50;
+                    similarityMatches.push({
+                        username: bannedUsername,
+                        similarity: similarity * 100,
+                        banReason: banData.reason || 'No reason provided',
+                        banDate: banData.banDate
+                    });
+                } else if (similarity > 0.6) {
+                    threatScore += 30;
+                    similarityMatches.push({
+                        username: bannedUsername,
+                        similarity: similarity * 100,
+                        banReason: banData.reason || 'No reason provided',
+                        banDate: banData.banDate
+                    });
+                }
+            }
+        }
+    }
 
-    // extreme
-    if (diff < oneWeek) return 0xff0000;
+    if (member.user.avatar) {
+        for (const [id, banData] of bannedUsers) {
+            if (banData.avatar && member.user.avatar === banData.avatar) {
+                threatScore += 40;
+                threatReasons.push("🖼️ Avatar matches a banned user");
+                break;
+            }
+        }
+    }
 
-    // dangerous
-    if (diff < oneMonth) return 0xff6600;
+    const joinedServers = member.client.guilds.cache.filter(g => g.members.cache.has(member.user.id));
+    if (joinedServers.size === 1) {
+        threatScore += 10;
+        threatReasons.push("📱 First time joining any mutual server");
+    }
 
-    // suspicious
-    if (diff < oneMonth * 3) return 0xffff00;
+    const recentLeaves = client.cache.recentLeaves?.get(member.user.id) || [];
+    if (recentLeaves.length > 0) {
+        const lastLeave = recentLeaves[recentLeaves.length - 1];
+        const timeSinceLeave = Date.now() - lastLeave;
+        if (timeSinceLeave < 24 * 60 * 60 * 1000) {
+            threatScore += 35;
+            threatReasons.push("🔄 Rejoined server within 24 hours of leaving");
+        }
+    }
 
-    // susceptible
-    if (diff < oneMonth * 6) return 0x00ff00;
+    if (similarityMatches.length > 0) {
+        threatReasons.push("🔍 Similar username to banned user(s):");
+        similarityMatches.forEach(match => {
+            threatReasons.push(`   • ${match.username} (${match.similarity.toFixed(1)}% match)`);
+            threatReasons.push(`     Ban reason: ${match.banReason}`);
+            if (match.banDate) {
+                threatReasons.push(`     Banned: <t:${Math.floor(match.banDate/1000)}:R>`);
+            }
+        });
+    }
 
-    // safe
-    return 0x00ffff;
+    threatScore = Math.min(threatScore, 100);
+
+    return {
+        score: threatScore,
+        reasons: threatReasons,
+        level: getThreatLabel(threatScore),
+        similarityMatches
+    };
+}
+
+function getThreatLabel(score) {
+    if (score >= THREAT_LEVELS.CRITICAL.score) return THREAT_LEVELS.CRITICAL.label;
+    if (score >= THREAT_LEVELS.EXTREME.score) return THREAT_LEVELS.EXTREME.label;
+    if (score >= THREAT_LEVELS.DANGEROUS.score) return THREAT_LEVELS.DANGEROUS.label;
+    if (score >= THREAT_LEVELS.SUSPICIOUS.score) return THREAT_LEVELS.SUSPICIOUS.label;
+    if (score >= THREAT_LEVELS.SUSCEPTIBLE.score) return THREAT_LEVELS.SUSCEPTIBLE.label;
+    return THREAT_LEVELS.SAFE.label;
 }
 
 client.on('guildMemberAdd', async member => {
-    if (member.guild.id !== '970775928596746290') return;
+    if (member.guild.id !== '1186251693122388010') return;
 
-    const channel = await client.channels.fetch('1053759729526112306').catch( () => {} );
+    const channel = await client.channels.fetch('1283574200090493020').catch(() => {});
     if (!channel) return console.log('No channel found');
 
-    // member logs
+    const threatAssessment = await calculateThreatLevel(member, client.cache.bannedUsers);
+    
     const embed = {
         author: {
             name: `${member.user.tag} (${member.user.id})`,
             iconURL: member.user.displayAvatarURL({ dynamic: true })
         },
         description: `
+👤 **Member Information**
 - Mention: <@${member.user.id}> \`(${member.user.id})\`
 - Bot: ${member.user.bot ? '✅' : '❌'}
+- Account Age: ${Math.floor((Date.now() - member.user.createdTimestamp) / (1000 * 60 * 60 * 24))} days
 
+⏰ **Timestamps**
 - Created: <t:${~~(member.user.createdTimestamp / 1000)}:f> (<t:${~~(member.user.createdTimestamp / 1000)}:R>)
 - Joined: <t:${~~(member.joinedTimestamp / 1000)}:f> (<t:${~~(member.joinedTimestamp / 1000)}:R>)
+
+🚨 **Threat Assessment**
+- Level: ${threatAssessment.level}
+- Score: ${threatAssessment.score}/100
+${threatAssessment.reasons.map(reason => `${reason}`).join('\n')}
+
+${threatAssessment.score >= THREAT_LEVELS.DANGEROUS.score ? '⚠️ **High threat level detected! Manual review recommended.**' : ''}
 `,
-        color: getThreatColor(member.user.createdTimestamp),
+        color: getThreatColor(threatAssessment.score),
         timestamp: new Date(),
         thumbnail: {
             url: member.user.displayAvatarURL({ dynamic: true })
         }
+    };
+
+    let actions = [];
+    
+    if (threatAssessment.score >= THREAT_LEVELS.CRITICAL.score) {
+        try {
+            await member.timeout(24 * 60 * 60 * 1000, 'Critical threat level detected');
+            actions.push('🔒 User has been automatically timed out for 24 hours');
+            
+            const securityChannel = await client.channels.fetch(securityConfig.actionsChannel).catch(() => null);
+            if (securityChannel) {
+                await securityChannel.send({
+                    content: `🚨 **CRITICAL THREAT DETECTED**\nUser: ${member.user.tag}\nAction: 24h timeout\nScore: ${threatAssessment.score}`,
+                    allowedMentions: { parse: ['roles'] }
+                });
+            }
+        } catch (error) {
+            console.error('Failed to handle critical threat:', error);
+            actions.push('❌ Failed to apply automatic actions - please check manually');
+        }
+    } else if (threatAssessment.score >= THREAT_LEVELS.EXTREME.score) {
+        try {
+            await member.timeout(1 * 60 * 60 * 1000, 'Extreme threat level detected');
+            actions.push('⚠️ User has been automatically timed out for 1 hour');
+        } catch (error) {
+            console.error('Failed to handle extreme threat:', error);
+            actions.push('❌ Failed to apply automatic actions - please check manually');
+        }
     }
 
-    await channel.send({ embeds: [embed] });
+    if (actions.length > 0) {
+        embed.description += `\n\n📋 **Automatic Actions Taken**\n${actions.join('\n')}`;
+    }
 
+    const needsPing = threatAssessment.score >= THREAT_LEVELS.DANGEROUS.score || 
+                     threatAssessment.reasons.some(reason => reason.includes("alternative account"));
+
+    await channel.send({ 
+        content: needsPing ? 'Potential Alt Account Detected!' : null,
+        embeds: [embed] 
+    });
 });
+
+
 
 let pingRegex = new RegExp();
 client.on('ready', () => pingRegex = new RegExp(`^<@!?${client.user.id}>`) );
@@ -693,6 +951,7 @@ Feel free to ask for help in <#1168247660944302090>!`
 });
 
 const Modname = require('./utils/Modname.js');
+const { channel } = require('node:diagnostics_channel');
 client.modname = Modname.bind(null, client);
 client.on('guildMemberAdd', client.modname);
 client.on('guildMemberUpdate', async function(oldMember, newMember) {

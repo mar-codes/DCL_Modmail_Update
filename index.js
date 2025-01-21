@@ -726,9 +726,9 @@ function getThreatLabel(score) {
 }
 
 client.on('guildMemberAdd', async member => {
-    if (member.guild.id !== '1186251693122388010') return;
+    if (member.guild.id !== '970775928596746290') return;
 
-    const channel = await client.channels.fetch('1283574200090493020').catch(() => {});
+    const channel = await client.channels.fetch('1053759729526112306').catch(() => {});
     if (!channel) return console.log('No channel found');
 
     const threatAssessment = await calculateThreatLevel(member, client.cache.bannedUsers);

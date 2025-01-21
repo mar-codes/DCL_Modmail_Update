@@ -1,7 +1,7 @@
 const config = {
     guild: {
-        id: '1186251693122388010',
-        modmailCategoryId: '1330773760835584103',
+        id: '970775928596746290',
+        modmailCategoryId: '1025792195564945418',
         ignorePrefix: '.'
     },
     colors: {
@@ -10,7 +10,7 @@ const config = {
         success: 0x00FF00
     },
     channels: {
-        applicationchannel: "1283574200090493020"
+        applicationchannel: "1187661431525605466"
     },
     emojis: {
         success: '🗳️',

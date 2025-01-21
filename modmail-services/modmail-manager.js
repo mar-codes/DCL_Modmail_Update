@@ -143,7 +143,6 @@ class ModmailManager {
                     value: [
                         `• Created: ${formatTimestamp(Date.now()).relative}`,
                         `• Status: Active`,
-                        `• ID: \`${modmail.modmailID}\``
                     ].join('\n')
                 },
                 {

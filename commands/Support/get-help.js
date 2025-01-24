@@ -72,7 +72,7 @@ module.exports = {
         .setName('get-help')
         .setDescription('Request technical assistance from our helper team.'),
 
-    async execute(interaction, client) {
+   async execute(interaction, client) {
         try {
             await interaction.deferReply({ ephemeral: true });
 

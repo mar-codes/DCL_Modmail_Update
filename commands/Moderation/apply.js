@@ -69,8 +69,6 @@ module.exports = {
 			]
 		});
 
-		await interaction.deferReply({ ephemeral: true });
-
 		const button = client.buttons.get('apply');
 		return await button.execute(interaction, client);
 	} catch (error) { 

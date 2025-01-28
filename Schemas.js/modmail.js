@@ -5,7 +5,6 @@ const modmailSchema = new Schema({
     guildID: { type: String, required: true },
     userID: { type: String, required: true },
     channelID: { type: String, required: true },
-    modmailID: { type: String, required: true },
     closed: { type: Boolean, default: false },
     createdTimestamp: { type: Number, default: Date.now },
     closedTimestamp: { type: Number, default: null },

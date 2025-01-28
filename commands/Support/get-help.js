@@ -74,10 +74,10 @@ module.exports = {
 
     async execute(interaction, client) {
         try {
-            await interaction.deferReply({ ephemeral: true });
+            await interaction.deferReply({ ephemeral: true }).catch( () => {} );
 
             if (interaction.channel.type !== 11) {
-                return await interaction.editReply({ 
+                return await interaction.editReply({
                     content: CONFIG.MESSAGES.ERROR_WRONG_CHANNEL 
                 });
             }

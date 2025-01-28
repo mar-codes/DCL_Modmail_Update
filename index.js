@@ -343,7 +343,7 @@ client.on('messageCreate', async function(message) {
         if (message.author.bot || 
             message.channel.type !== ChannelType.GuildText ||
             message.channel.parentId !== config.guild.modmailCategoryId ||
-            !message.content.startsWith(config.guild.ignorePrefix)) {
+            message.content.startsWith(config.guild.sendPrefix)) {
             return;
         }
 

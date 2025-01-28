@@ -272,8 +272,7 @@ client.on('messageCreate', async (message) => {
                 guildID: guild.id,
                 userID: message.author.id,
                 channelID: channel.id,
-                createdTimestamp: Date.now(),
-                modmailID: Date.now().toString(),
+                createdTimestamp: Date.now()
             });
 
             const sentMessage = await channel.send({

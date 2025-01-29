@@ -18,18 +18,16 @@ class ModmailManager {
     }
 
     async isBlacklisted(userID) {
-        const blacklist = await BlacklistSchema.findOne({ userID });
-        return !!blacklist;
+        return Boolean( await BlacklistSchema.findOne({ userID }) );
     }
 
-    async updateUserStatus(channel, userId, messageId) {
-        this.clearInterval(messageId);
-    
-        const updateStatus = async () => {
+    async CreateStatusUpdate(channel, userId, messageId) {
+		const guild = this.client.guilds.cache.get(config.guild.id);
+
+		const updateStatus = async () => {
             try {
-                const guild = await this.client.guilds.fetch(config.guild.id);
-                const member = await guild.members.fetch(userId);
-                const message = await channel.messages.fetch(messageId);
+				const member = guild.members.cache.get(userId) ?? await guild.members.fetch(userId);
+                const message = channel.messages.cache.get(messageId) ?? await channel.messages.fetch(messageId);
     
                 if (!message || !message.embeds || !message.embeds[0]) {
                     console.error('No message or embeds found:', { messageId, hasMessage: !!message });
@@ -41,20 +39,12 @@ class ModmailManager {
                     fields: [...(message.embeds[0].fields || [])]
                 };
     
-                const statusEmojis = {
-                    online: '🟢 Online',
-                    idle: '🟡 Idle',
-                    dnd: '🔴 Do Not Disturb',
-                    offline: '⚫ Offline'
-                };
-    
                 let statusIndex = updatedEmbed.fields.findIndex(f => f.name === 'User Status');
                 const statusField = {
                     name: 'User Status',
-                    value: [
-                        `${statusEmojis[member.presence?.status ?? 'offline']}`,
-                        `Last Updated: <t:${Math.floor(Date.now()/1000)}:R>`
-                    ].join('\n'),
+                    value: `
+${formatUserStatus(member.presence?.status)}
+Last Updated: <t:${Math.floor(Date.now()/1000)}:R>`,
                     inline: true
                 };
     
@@ -73,7 +63,7 @@ class ModmailManager {
         };
     
         await updateStatus();
-        const intervalId = setInterval(updateStatus, 60000);
+        const intervalId = setInterval(updateStatus, 60_000);
         this.activeIntervals.set(messageId, intervalId);
     }
 

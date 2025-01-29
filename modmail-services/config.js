@@ -32,7 +32,8 @@ const config = {
         online: '🟢 Online',
         idle: '🟡 Idle',
         dnd: '🔴 Do Not Disturb',
-        offline: '⚫ Offline'
+        offline: '⚫ Offline',
+		leftServer: '❔ Left Server'
     },
     updateInterval: 60000,
     embeds: {

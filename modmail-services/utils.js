@@ -1,6 +1,6 @@
 const config = require('./config.js');
 
-const formatTimestamp = (timestamp) => {
+function formatTimestamp (timestamp) {
     const unix = Math.floor(timestamp / 1000);
     return {
         relative: `<t:${unix}:R>`,
@@ -8,9 +8,8 @@ const formatTimestamp = (timestamp) => {
     };
 };
 
-const formatUserStatus = (member) => {
-    const status = member?.presence?.status || 'offline';
-    return config.statusEmojis[status] || config.statusEmojis.offline;
+function formatUserStatus (member) {
+    return !member ? config.statusEmojis.leftServer : config.statusEmojis[member?.presence?.status] || config.statusEmojis.offline;
 };
 
 module.exports = {

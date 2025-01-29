@@ -257,7 +257,7 @@ client.on('messageCreate', async (message) => {
             const channel = await client.channels.fetch(modmailData.channelID);
             const sentMessage = await channel.send(messageData);
             await message.react(config.emojis.success);
-            modmailManager.updateUserStatus(channel, message.author.id, sentMessage.id);
+            modmailManager.CreateStatusUpdate(channel, message.author.id, sentMessage.id);
         } else {
             const category = await guild.channels.fetch(config.guild.modmailCategoryId).catch(() => null);
             if (!category) throw new Error('Category not found');
@@ -286,7 +286,7 @@ client.on('messageCreate', async (message) => {
             });
 
             await message.react(config.emojis.success);
-            modmailManager.updateUserStatus(channel, message.author.id, sentMessage.id);
+            modmailManager.CreateStatusUpdate(channel, message.author.id, sentMessage.id);
         }
 
         await ModmailSchema.updateOne(
@@ -342,7 +342,7 @@ client.on('messageCreate', async function(message) {
         if (message.author.bot || 
             message.channel.type !== ChannelType.GuildText ||
             message.channel.parentId !== config.guild.modmailCategoryId ||
-            message.content.startsWith(config.guild.sendPrefix)) {
+            !message.content.startsWith(config.guild.sendPrefix)) {
             return;
         }
 

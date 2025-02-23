@@ -18,7 +18,15 @@ class ModmailManager {
     }
 
     async isBlacklisted(userID) {
-        return Boolean( await BlacklistSchema.findOne({ userID }) );
+        try {
+            const blacklistDoc = await BlacklistSchema.findOne({ 
+                userID: userID 
+            });
+            return blacklistDoc !== null;
+        } catch (error) {
+            console.error('Error checking blacklist status', error);
+            return false;
+        }
     }
 
     async CreateStatusUpdate(channel, userId, messageId) {

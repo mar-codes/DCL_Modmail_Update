@@ -7,7 +7,7 @@ require('./utils/ProcessHandlers.js')();
 const {
     Client,
     Partials,
-    ChannelType
+    ChannelType,
 } = require(`discord.js`);
 const mongoose = require('mongoose');
 
@@ -18,7 +18,7 @@ const client = new Client({
         'GuildMessages',
         'DirectMessages',
         'MessageContent',
-        'GuildPresences'
+        'GuildPresences' 
     ],
     partials: [
         Partials.Message,
@@ -250,14 +250,11 @@ client.on('messageCreate', async (message) => {
         const guild = await client.guilds.fetch(config.guild.id).catch(() => null);
         const member = guild ? await guild.members.fetch(message.author.id).catch(() => null) : null;
 
-        const embed = modmailManager.createUserEmbed(message, member);
-        const messageData = { embeds: [embed] };
-
         if (modmailData) {
             const channel = await client.channels.fetch(modmailData.channelID);
-            const sentMessage = await channel.send(messageData);
+            const messageEmbed = modmailManager.createUserMessageEmbed(message);
+            await channel.send({ embeds: [messageEmbed] });
             await message.react(config.emojis.success);
-            modmailManager.CreateStatusUpdate(channel, message.author.id, sentMessage.id);
         } else {
             const category = await guild.channels.fetch(config.guild.modmailCategoryId).catch(() => null);
             if (!category) throw new Error('Category not found');
@@ -275,10 +272,7 @@ client.on('messageCreate', async (message) => {
                 createdTimestamp: Date.now()
             });
 
-            const sentMessage = await channel.send({
-                ...messageData,
-                components: [modmailManager.createButtons(guild.id, message.author.id, true)]
-            });
+            await modmailManager.setupInitialModmail(channel, message, member);
 
             await message.author.send({
                 embeds: [modmailManager.createTicketEmbed()],
@@ -286,7 +280,6 @@ client.on('messageCreate', async (message) => {
             });
 
             await message.react(config.emojis.success);
-            modmailManager.CreateStatusUpdate(channel, message.author.id, sentMessage.id);
         }
 
         await ModmailSchema.updateOne(
@@ -307,7 +300,6 @@ client.on('messageCreate', async (message) => {
         }).catch(() => {});
     }
 });
-
 
 const PERMISSION_COLORS = {
     'Owner': 0xFF0000,        // Red
@@ -953,4 +945,49 @@ client.on('guildMemberUpdate', async function(oldMember, newMember) {
 	if (oldName === newName) return;
 
 	await client.modname(newMember);
+});
+
+const sticky = require('./Schemas.js/stickMessageSystem');
+
+client.on('messageCreate', async (message) => {
+    if (!message.guild || !message.channel) return;
+
+    var data = await sticky.find({ Guild: message.guild.id, Channel: message.channel.id});
+    if (data.length == 0) return;
+    if (message.author.bot) return;
+
+    await data.forEach(async value => {
+        if (!value.uniqueId) {
+            value.uniqueId = crypto.randomBytes(3).toString('hex').toUpperCase();
+            await value.save();
+        }
+
+        if (value.Count == value.Cap-1) {
+            if (value.LastMessageId) {
+                try {
+                    const previousMessage = await message.channel.messages.fetch(value.LastMessageId);
+                    if (previousMessage) await previousMessage.delete().catch(() => {});
+                } catch (error) {
+                    // Message might not exist anymore, ignore error
+                }
+            }
+
+            const embed = {
+                color: 0x2196f3,
+                description: `${value.Message}`,
+                footer: {
+                    text: `Sticky Message • ID: ${value.uniqueId}`
+                },
+                timestamp: new Date()
+            }
+
+            const newSticky = await message.channel.send({ embeds: [embed] });
+            value.LastMessageId = newSticky.id;
+            value.Count = 0;
+            await value.save();
+        } else {
+            value.Count++;
+            await value.save();
+        }
+    });
 });

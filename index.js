@@ -7,7 +7,7 @@ require('./utils/ProcessHandlers.js')();
 const {
     Client,
     Partials,
-    ChannelType
+    ChannelType,
 } = require(`discord.js`);
 const mongoose = require('mongoose');
 
@@ -953,4 +953,31 @@ client.on('guildMemberUpdate', async function(oldMember, newMember) {
 	if (oldName === newName) return;
 
 	await client.modname(newMember);
+});
+
+const sticky = require('./Schemas.js/stickMessageSystem');
+
+client.on('messageCreate', async (message) => {
+    if (!message.guild || !message.channel) return;
+
+    var data = await sticky.find({ Guild: message.guild.id, Channel: message.channel.id});
+    if (data.length == 0) return;
+    if (message.author.bot) return;
+
+    await data.forEach(async value => {
+        if (value.Count == value.Cap-1) {
+            const embed = {
+                color: 0x2196f3,
+                title: `${client.user.username} Sticky Message System`,
+                description: `> ${value.Message}`,
+                timestamp: new Date()
+            }
+            await message.channel.send({ embeds: [embed] });
+            value.Count = 0;
+            await value.save();
+        } else {
+            value.Count++;
+            await value.save();
+        }
+    });
 });

@@ -30,46 +30,45 @@ class ModmailManager {
     }
 
     async CreateStatusUpdate(channel, userId, messageId) {
-		const guild = this.client.guilds.cache.get(config.guild.id);
+        const guild = this.client.guilds.cache.get(config.guild.id);
 
-		const updateStatus = async () => {
+        const updateStatus = async () => {
             try {
-				const member = guild.members.cache.get(userId) ?? await guild.members.fetch(userId);
-                const message = channel.messages.cache.get(messageId) ?? await channel.messages.fetch(messageId);
-    
-                if (!message || !message.embeds || !message.embeds[0]) {
+                const member = await guild.members.fetch(userId);
+                const presence = member.presence;
+                const message = await channel.messages.fetch(messageId);
+
+                if (!message?.embeds?.[0]) {
                     console.error('No message or embeds found:', { messageId, hasMessage: !!message });
                     return this.clearInterval(messageId);
                 }
-    
+
                 const updatedEmbed = {
                     ...message.embeds[0].toJSON(),
                     fields: [...(message.embeds[0].fields || [])]
                 };
-    
+
                 let statusIndex = updatedEmbed.fields.findIndex(f => f.name === 'User Status');
                 const statusField = {
                     name: 'User Status',
-                    value: `
-${formatUserStatus(member.presence?.status)}
-Last Updated: <t:${Math.floor(Date.now()/1000)}:R>`,
+                    value: `${formatUserStatus(presence?.status)}\nLast Updated: <t:${Math.floor(Date.now()/1000)}:R>`,
                     inline: true
                 };
-    
+
                 if (statusIndex === -1) {
                     updatedEmbed.fields.push(statusField);
                 } else {
                     updatedEmbed.fields[statusIndex] = statusField;
                 }
-    
+
                 await message.edit({ embeds: [updatedEmbed] });
-    
+
             } catch (error) {
                 console.error('Error updating status:', error);
                 this.clearInterval(messageId);
             }
         };
-    
+
         await updateStatus();
         const intervalId = setInterval(updateStatus, 60_000);
         this.activeIntervals.set(messageId, intervalId);
@@ -82,7 +81,44 @@ Last Updated: <t:${Math.floor(Date.now()/1000)}:R>`,
         }
     }
 
-    createUserEmbed(message, member, modmailID) {
+    createUserInfoEmbed(message, member) {
+        const embed = {
+            author: {
+                name: message.author.globalName || message.author.username,
+                iconURL: message.author.displayAvatarURL({ dynamic: true, size: 128 })
+            },
+            title: '📋 User Information',
+            fields: [
+                {
+                    name: 'User Details',
+                    value: [
+                        `ID: \`${message.author.id}\``,
+                        `Created: ${formatTimestamp(message.author.createdTimestamp).relative}`,
+                        member ? `Joined: ${formatTimestamp(member.joinedTimestamp).relative}` : ''
+                    ].filter(Boolean).join('\n'),
+                    inline: true
+                },
+                {
+                    name: 'User Status',
+                    value: `${formatUserStatus(member?.presence?.status)}`,
+                    inline: true
+                }
+            ],
+            thumbnail: {
+                url: message.author.displayAvatarURL({ dynamic: true, size: 256 })
+            },
+            color: config.colors.primary,
+            timestamp: new Date(),
+            footer: {
+                text: 'ModMail User Information',
+                iconURL: this.client.user.displayAvatarURL()
+            }
+        };
+
+        return embed;
+    }
+
+    createUserMessageEmbed(message) {
         const embed = {
             author: {
                 name: message.author.globalName || message.author.username,
@@ -93,42 +129,50 @@ Last Updated: <t:${Math.floor(Date.now()/1000)}:R>`,
                 message.content || '*No message content*',
                 '```'
             ].join('\n'),
-            fields: [
-                {
-                    name: 'User Details',
-                    value: [
-                        `ID: \`${message.author.id}\``,
-                        `Created: ${formatTimestamp(message.author.createdTimestamp).relative}`,
-                        member ? `Joined: ${formatTimestamp(member.joinedTimestamp).relative}` : ''
-                    ].filter(Boolean).join('\n'),
-                    inline: true
-                }
-            ],
-            thumbnail: {
-                url: message.author.displayAvatarURL({ dynamic: true, size: 256 })
-            },
             color: config.colors.primary,
             timestamp: new Date(),
             footer: {
+                text: 'User Message',
                 iconURL: this.client.user.displayAvatarURL()
             }
         };
-    
+
         if (message.attachments.size > 0) {
-            embed.fields.push({
+            embed.fields = [{
                 name: `${config.emojis.attachment} Attachments`,
                 value: message.attachments.map(attachment => 
                     `[${attachment.name}](${attachment.url})`
                 ).join('\n')
-            });
+            }];
         }
-    
+
         const sticker = message.stickers.first();
         if (sticker) {
             embed.image = { url: sticker.url };
         }
-    
+
         return embed;
+    }
+
+    async setupInitialModmail(channel, message, member) {
+        try {
+            const userInfoEmbed = this.createUserInfoEmbed(message, member);
+            const infoMessage = await channel.send({ 
+                embeds: [userInfoEmbed],
+                components: [this.createButtons(channel.guild.id, message.author.id, true)]
+            });
+            await infoMessage.pin();
+
+            await this.CreateStatusUpdate(channel, message.author.id, infoMessage.id);
+
+            const messageEmbed = this.createUserMessageEmbed(message);
+            await channel.send({ embeds: [messageEmbed] });
+
+            return infoMessage.id;
+        } catch (error) {
+            console.error('Error setting up initial modmail:', error);
+            throw error;
+        }
     }
 
     createTicketEmbed(message = null) {

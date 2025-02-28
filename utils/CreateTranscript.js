@@ -7,7 +7,7 @@ module.exports = async function (channel, allMessages = false) {
 		const transcript = await createTranscript(channel, {
 			limit: -1,
 			returnType: 'attachment',
-			filename: `transcript-${user.globalName || user.username}.html`,
+			filename: 'transcript.html',
 			saveImages: true,
 			poweredBy: false
 		});

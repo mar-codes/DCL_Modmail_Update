@@ -90,10 +90,10 @@ module.exports = {
                 });
             }
 
-            const cooldownKey = `${interaction.user.id}-get-help`;
-            const cooldownTime = client.cooldowns.get(cooldownKey);
-            
-            if (cooldownTime && cooldownTime > Date.now()) {
+            const cooldownKey = `${interaction.channel.id}-get-help`;
+            const cooldownTime = client.cooldowns.get(cooldownKey) ?? 0;
+
+            if (cooldownTime > Date.now()) {
                 return await interaction.editReply({
                     content: CONFIG.MESSAGES.ERROR_COOLDOWN.replace('{TIME}', formatTimeRemaining(cooldownTime))
                 });

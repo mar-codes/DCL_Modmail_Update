@@ -73,7 +73,10 @@ module.exports = {
             switch (sub) {
                 case 'setup':
                     const channel = options.getChannel('channel');
-                    const message = options.getString('message');
+                    let message = options.getString('message');
+
+                    message = message.replace(/\\n/g, '\n');
+                    
                     const cap = options.getNumber('cap');
                     const uniqueId = generateUniqueId();
                     
@@ -101,7 +104,7 @@ module.exports = {
                             uniqueId: uniqueId
                         });
 
-                        await sendResponse(`I have added the sticky message "\`${message}\`" to <#${channel.id}>\nID: \`${uniqueId}\``);
+                        await sendResponse(`I have added the sticky message to <#${channel.id}>\nID: \`${uniqueId}\``);
                     }
                     break;
 

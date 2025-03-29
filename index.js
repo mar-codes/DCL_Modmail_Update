@@ -991,3 +991,31 @@ client.on('messageCreate', async (message) => {
         }
     });
 });
+
+client.on('messageCreate', async (message) => {
+    if (message.author.bot) return;
+
+    const emojis = [
+        "👋",
+        "<a:catwave:1124733058214543494>",
+        "<a:hello:1089605823438798939>",
+        "<a:pepewave:1108966307862421584>",
+        "<:wave:1082265671326502942>",
+        "<a:welcome:1083191197553655828>",
+        "<a:welcome:1124234836916318298>",
+        "<a:welcome:1149717561395646555>",
+        "<a:wavePepe:1355626542172213399>",
+        "<a:wavey:1355626703480950885>"
+    ]
+
+    const randomEmoji = emojis[Math.floor(Math.random() * emojis.length)];
+
+    if (message.channel.id === '1079430450830921829') {
+        try {
+            await message.react(randomEmoji);
+        } catch (error) {
+            console.error('Failed to auto-react with wave emoji:', error);
+        }
+    }
+});
+

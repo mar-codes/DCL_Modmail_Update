@@ -4,8 +4,7 @@ const  {
 	TextInputStyle,
 	ActionRowBuilder
 } = require('discord.js');
-
-const { createTranscript } = require('discord-html-transcripts');
+const CreateTranscript = require('../utils/CreateTranscript');
 
 const staffRoles = [
 	'970775928701603841', // Moderator
@@ -90,13 +89,7 @@ module.exports = {
 				embeds: [embed]
 			});
 
-			const transcript = await createTranscript(channel, {
-				limit: -1,
-				returnType: 'attachment',
-				filename: `transcript-${user.globalName || user.username}.html`,
-				saveImages: true,
-				poweredBy: false
-			});
+			const transcript = await CreateTranscript(channel);
 
 			await new Promise(resolve => setTimeout(resolve, 1000));
 

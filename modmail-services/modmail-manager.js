@@ -18,62 +18,59 @@ class ModmailManager {
     }
 
     async isBlacklisted(userID) {
-        const blacklist = await BlacklistSchema.findOne({ userID });
-        return !!blacklist;
+        try {
+            const blacklistDoc = await BlacklistSchema.findOne({ 
+                userID: userID 
+            });
+            return blacklistDoc !== null;
+        } catch (error) {
+            console.error('Error checking blacklist status', error);
+            return false;
+        }
     }
 
-    async updateUserStatus(channel, userId, messageId) {
-        this.clearInterval(messageId);
-    
+    async CreateStatusUpdate(channel, userId, messageId) {
+        const guild = this.client.guilds.cache.get(config.guild.id);
+
         const updateStatus = async () => {
             try {
-                const guild = await this.client.guilds.fetch(config.guild.id);
                 const member = await guild.members.fetch(userId);
+                const presence = member.presence;
                 const message = await channel.messages.fetch(messageId);
-    
-                if (!message || !message.embeds || !message.embeds[0]) {
+
+                if (!message?.embeds?.[0]) {
                     console.error('No message or embeds found:', { messageId, hasMessage: !!message });
                     return this.clearInterval(messageId);
                 }
-    
+
                 const updatedEmbed = {
                     ...message.embeds[0].toJSON(),
                     fields: [...(message.embeds[0].fields || [])]
                 };
-    
-                const statusEmojis = {
-                    online: '🟢 Online',
-                    idle: '🟡 Idle',
-                    dnd: '🔴 Do Not Disturb',
-                    offline: '⚫ Offline'
-                };
-    
+
                 let statusIndex = updatedEmbed.fields.findIndex(f => f.name === 'User Status');
                 const statusField = {
                     name: 'User Status',
-                    value: [
-                        `${statusEmojis[member.presence?.status ?? 'offline']}`,
-                        `Last Updated: <t:${Math.floor(Date.now()/1000)}:R>`
-                    ].join('\n'),
+                    value: `${formatUserStatus(presence?.status)}\nLast Updated: <t:${Math.floor(Date.now()/1000)}:R>`,
                     inline: true
                 };
-    
+
                 if (statusIndex === -1) {
                     updatedEmbed.fields.push(statusField);
                 } else {
                     updatedEmbed.fields[statusIndex] = statusField;
                 }
-    
+
                 await message.edit({ embeds: [updatedEmbed] });
-    
+
             } catch (error) {
                 console.error('Error updating status:', error);
                 this.clearInterval(messageId);
             }
         };
-    
+
         await updateStatus();
-        const intervalId = setInterval(updateStatus, 60000);
+        const intervalId = setInterval(updateStatus, 60_000);
         this.activeIntervals.set(messageId, intervalId);
     }
 
@@ -84,7 +81,44 @@ class ModmailManager {
         }
     }
 
-    createUserEmbed(message, member, modmailID) {
+    createUserInfoEmbed(message, member) {
+        const embed = {
+            author: {
+                name: message.author.globalName || message.author.username,
+                iconURL: message.author.displayAvatarURL({ dynamic: true, size: 128 })
+            },
+            title: '📋 User Information',
+            fields: [
+                {
+                    name: 'User Details',
+                    value: [
+                        `ID: \`${message.author.id}\``,
+                        `Created: ${formatTimestamp(message.author.createdTimestamp).relative}`,
+                        member ? `Joined: ${formatTimestamp(member.joinedTimestamp).relative}` : ''
+                    ].filter(Boolean).join('\n'),
+                    inline: true
+                },
+                {
+                    name: 'User Status',
+                    value: `${formatUserStatus(member?.presence?.status)}`,
+                    inline: true
+                }
+            ],
+            thumbnail: {
+                url: message.author.displayAvatarURL({ dynamic: true, size: 256 })
+            },
+            color: config.colors.primary,
+            timestamp: new Date(),
+            footer: {
+                text: 'ModMail User Information',
+                iconURL: this.client.user.displayAvatarURL()
+            }
+        };
+
+        return embed;
+    }
+
+    createUserMessageEmbed(message) {
         const embed = {
             author: {
                 name: message.author.globalName || message.author.username,
@@ -95,42 +129,50 @@ class ModmailManager {
                 message.content || '*No message content*',
                 '```'
             ].join('\n'),
-            fields: [
-                {
-                    name: 'User Details',
-                    value: [
-                        `ID: \`${message.author.id}\``,
-                        `Created: ${formatTimestamp(message.author.createdTimestamp).relative}`,
-                        member ? `Joined: ${formatTimestamp(member.joinedTimestamp).relative}` : ''
-                    ].filter(Boolean).join('\n'),
-                    inline: true
-                }
-            ],
-            thumbnail: {
-                url: message.author.displayAvatarURL({ dynamic: true, size: 256 })
-            },
             color: config.colors.primary,
             timestamp: new Date(),
             footer: {
+                text: 'User Message',
                 iconURL: this.client.user.displayAvatarURL()
             }
         };
-    
+
         if (message.attachments.size > 0) {
-            embed.fields.push({
+            embed.fields = [{
                 name: `${config.emojis.attachment} Attachments`,
                 value: message.attachments.map(attachment => 
                     `[${attachment.name}](${attachment.url})`
                 ).join('\n')
-            });
+            }];
         }
-    
+
         const sticker = message.stickers.first();
         if (sticker) {
             embed.image = { url: sticker.url };
         }
-    
+
         return embed;
+    }
+
+    async setupInitialModmail(channel, message, member) {
+        try {
+            const userInfoEmbed = this.createUserInfoEmbed(message, member);
+            const infoMessage = await channel.send({ 
+                embeds: [userInfoEmbed],
+                components: [this.createButtons(channel.guild.id, message.author.id, true)]
+            });
+            await infoMessage.pin();
+
+            await this.CreateStatusUpdate(channel, message.author.id, infoMessage.id);
+
+            const messageEmbed = this.createUserMessageEmbed(message);
+            await channel.send({ embeds: [messageEmbed] });
+
+            return infoMessage.id;
+        } catch (error) {
+            console.error('Error setting up initial modmail:', error);
+            throw error;
+        }
     }
 
     createTicketEmbed(message = null) {
@@ -210,7 +252,7 @@ class ModmailManager {
             dateStyle: isToday ? undefined : 'short'
         });
 
-        let description = message.content?.trim() || '*No message content*';
+        let description = message.content?.replace(/^\.+ */, '') || '*No message content*';
         if (description.length > 4000) {
             description = description.slice(0, 3997) + '...';
         }

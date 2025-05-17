@@ -1,4 +1,5 @@
 const { createTranscript } = require('discord-html-transcripts');
+const CreateTranscript = require('../utils/CreateTranscript');
 
 module.exports = {
 	customID: 'modmailClose',
@@ -75,22 +76,17 @@ Reason: \`\`\`${reason}\`\`\``,
 			await channel.delete().catch( () => {} );
 		}, 1000 * 15);
 
-		const transcript = await createTranscript(channel, {
-			limit: -1,
-			returnType: 'attachment',
-			filename: `transcript-${user.globalName || user.username}.html`,
-			saveImages: true,
-			poweredBy: false
-		});
+		const userTranscript = await CreateTranscript(channel);
+		const staffTranscript = await createTranscript(channel, true);
 
 		await user?.send({
-			files: [transcript]
+			files: [userTranscript]
 		}).catch( () => {} );
 
 		const transcriptChannel = guild.channels.cache.get('1108819757160996966');
 		transcriptChannel?.send({
 			embeds: [embed],
-			files: [transcript]
+			files: [staffTranscript]
 		});
 
 	}

@@ -1,19 +1,22 @@
-const config = require('./config.js');
-
-const formatTimestamp = (timestamp) => {
-    const unix = Math.floor(timestamp / 1000);
+function formatTimestamp(timestamp) {
     return {
-        relative: `<t:${unix}:R>`,
-        full: `<t:${unix}:F>`
+        relative: `<t:${Math.floor(timestamp / 1000)}:R>`,
+        absolute: `<t:${Math.floor(timestamp / 1000)}:f>`
     };
-};
+}
 
-const formatUserStatus = (member) => {
-    const status = member?.presence?.status || 'offline';
-    return config.statusEmojis[status] || config.statusEmojis.offline;
-};
+function formatUserStatus(status = 'offline') {
+    const statusMap = {
+        online: '🟢 Online',
+        idle: '🟡 Idle',
+        dnd: '🔴 Do Not Disturb',
+        offline: '⚫ Offline'
+    };
+
+    return statusMap[status] || statusMap.offline;
+}
 
 module.exports = {
     formatTimestamp,
     formatUserStatus
-}
+};

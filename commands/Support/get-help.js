@@ -2,16 +2,16 @@ const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 
 const CONFIG = {
     MAX_HELPERS: 3,
-    COOLDOWN_MINUTES: 10,
+    COOLDOWN_MINUTES: 0,
 
     ROLES: {
-        '1330744743008665600': '1330742740107137085', // MongoDB Helper
-        '1330744731394637934': '1330742771128205392', // SQL Helper
+        '1184616712142860339': '1187083774828216382', // MongoDB Helper
+        '1184616712142860339': '1187083830474059866', // SQL Helper
         '1330744479757369364': '1330743018688483409', // HTML Helper
-        '1330744505464389705': '1330742717688578069'  // JS Helper
+        '1168247660944302090': '1082346384876900452'  // JS Helper
     },
 
-    DEFAULT_ROLE: '1330742717688578069',
+    DEFAULT_ROLE: '1198108710912917565',
 
     COLORS: {
         PRIMARY: 0x5865F2,    // Discord blue
@@ -74,10 +74,10 @@ module.exports = {
 
     async execute(interaction, client) {
         try {
-            await interaction.deferReply({ ephemeral: true });
+            await interaction.deferReply({ ephemeral: true }).catch( () => {} );
 
             if (interaction.channel.type !== 11) {
-                return await interaction.editReply({ 
+                return await interaction.editReply({
                     content: CONFIG.MESSAGES.ERROR_WRONG_CHANNEL 
                 });
             }
@@ -90,10 +90,10 @@ module.exports = {
                 });
             }
 
-            const cooldownKey = `${interaction.user.id}-get-help`;
-            const cooldownTime = client.cooldowns.get(cooldownKey);
-            
-            if (cooldownTime && cooldownTime > Date.now()) {
+            const cooldownKey = `${interaction.channel.id}-get-help`;
+            const cooldownTime = client.cooldowns.get(cooldownKey) ?? 0;
+
+            if (cooldownTime > Date.now()) {
                 return await interaction.editReply({
                     content: CONFIG.MESSAGES.ERROR_COOLDOWN.replace('{TIME}', formatTimeRemaining(cooldownTime))
                 });

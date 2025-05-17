@@ -75,7 +75,8 @@ module.exports = {
 		return await button.execute(interaction, client);
 	} catch (error) { 
 		console.error(error);
-		return await interaction.reply({
+		await interaction.deferReply({ ephemeral: true }).catch(() => {});
+		await interaction.editReply({
 			content: `An error occurred: \`${error.message}\``,
 			ephemeral: true
 		});

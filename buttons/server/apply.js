@@ -46,8 +46,8 @@ module.exports = {
 			const { AttachmentBuilder } = require('discord.js');
 			const path = require("node:path")
 			const attachment = new AttachmentBuilder(
-				path.join(__dirname, '../../assets/badapplication.png'),
-				{ name: 'badapplication.png' }
+				`${__dirname}/../../assets/BadApplication.png`,
+				{ name: 'BadApplication.png' }
 			);
 
 			const questionEmbed = {

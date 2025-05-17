@@ -30,30 +30,13 @@ This is just an archive of images for the older [Badge Command](https://www.yout
 			components: [
 				{
 					type: 2,
-					label: 'Slash Command Package',
+					label: 'Download Center',
 					style: 5,
-					url: 'https://www.mediafire.com/file/9zb43qlrstlfrex/SlashCommand_Package.zip/file',
+					url: 'https://codingloungedownloads.onrender.com/',
 					emoji: {
 						id: '1000093816012943451',
 						name: 'Slash_Commands'
 					}
-				},
-				{
-					type: 2,
-					label: 'Dev Toolkit',
-					style: 5,
-					url: 'https://www.mediafire.com/file/g24dxp1i6739cxx/DevToolkit_%281%29.zip/file',
-					emoji: {
-						id: '1050871360093704293',
-						name: 'Admin'
-					}
-				},
-				{
-					type: 2,
-					label: 'Badge Images',
-					style: 5,
-					url: 'https://www.mediafire.com/file/ijj66t743bcv0l8/Badges.zip/file',
-					emoji: '🏅'
 				}
 			]
 		}

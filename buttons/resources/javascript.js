@@ -9,7 +9,7 @@ module.exports = {
 		}
 
 		const embed = {
-			title: 'JavaScript Resources <:Javascript:1052611937004965931>',
+			title: 'JavaScript Resources',
 			description: `
 📗 - Beginner
 📘 - Intermediate

@@ -3,11 +3,13 @@ const crypto = require('node:crypto');
 const BlacklistSchema = require('./Schemas.js/blacklist.js');
 const securityConfig = require('./security/config.json')
 require('./utils/ProcessHandlers.js')();
+const JSONdb = require('simple-json-db');
+const db = new JSONdb('./counting.json');
 
 const {
     Client,
     Partials,
-    ChannelType
+    ChannelType,
 } = require(`discord.js`);
 const mongoose = require('mongoose');
 
@@ -18,7 +20,7 @@ const client = new Client({
         'GuildMessages',
         'DirectMessages',
         'MessageContent',
-        'GuildPresences'
+        'GuildPresences' 
     ],
     partials: [
         Partials.Message,
@@ -250,14 +252,11 @@ client.on('messageCreate', async (message) => {
         const guild = await client.guilds.fetch(config.guild.id).catch(() => null);
         const member = guild ? await guild.members.fetch(message.author.id).catch(() => null) : null;
 
-        const embed = modmailManager.createUserEmbed(message, member);
-        const messageData = { embeds: [embed] };
-
         if (modmailData) {
             const channel = await client.channels.fetch(modmailData.channelID);
-            const sentMessage = await channel.send(messageData);
+            const messageEmbed = modmailManager.createUserMessageEmbed(message);
+            await channel.send({ embeds: [messageEmbed] });
             await message.react(config.emojis.success);
-            modmailManager.updateUserStatus(channel, message.author.id, sentMessage.id);
         } else {
             const category = await guild.channels.fetch(config.guild.modmailCategoryId).catch(() => null);
             if (!category) throw new Error('Category not found');
@@ -272,14 +271,10 @@ client.on('messageCreate', async (message) => {
                 guildID: guild.id,
                 userID: message.author.id,
                 channelID: channel.id,
-                createdTimestamp: Date.now(),
-                modmailID: Date.now().toString(),
+                createdTimestamp: Date.now()
             });
 
-            const sentMessage = await channel.send({
-                ...messageData,
-                components: [modmailManager.createButtons(guild.id, message.author.id, true)]
-            });
+            await modmailManager.setupInitialModmail(channel, message, member);
 
             await message.author.send({
                 embeds: [modmailManager.createTicketEmbed()],
@@ -287,7 +282,6 @@ client.on('messageCreate', async (message) => {
             });
 
             await message.react(config.emojis.success);
-            modmailManager.updateUserStatus(channel, message.author.id, sentMessage.id);
         }
 
         await ModmailSchema.updateOne(
@@ -308,7 +302,6 @@ client.on('messageCreate', async (message) => {
         }).catch(() => {});
     }
 });
-
 
 const PERMISSION_COLORS = {
     'Owner': 0xFF0000,        // Red
@@ -343,11 +336,9 @@ client.on('messageCreate', async function(message) {
         if (message.author.bot || 
             message.channel.type !== ChannelType.GuildText ||
             message.channel.parentId !== config.guild.modmailCategoryId ||
-            message.content.startsWith(config.guild.ignorePrefix)) {
+            !message.content.startsWith(config.guild.sendPrefix)) {
             return;
         }
-
-        await message.react(REACTIONS.PENDING);
 
         const responderPermission = getStaffPermissionLevel(message.member);
         const embed = modmailManager.createModMailEmbed(message, responderPermission);
@@ -363,21 +354,18 @@ client.on('messageCreate', async function(message) {
         });
 
         if (!modmailData) {
-            await message.reactions.removeAll();
             await message.react(REACTIONS.ERROR);
             return;
         }
 
         const user = await client.users.fetch(modmailData.userID).catch(() => null);
         if (!user) {
-            await message.reactions.removeAll();
             await message.react(REACTIONS.ERROR);
             return;
         }
 
         await user.send(messageData)
             .then(async () => {
-                await message.reactions.removeAll();
                 await message.react(REACTIONS.SUCCESS);
                 await client.schemas.modmail.updateOne({
                     guildID: message.guild.id,
@@ -396,7 +384,6 @@ client.on('messageCreate', async function(message) {
 
     } catch (error) {
         console.error('Error in messageCreate handler:', error);
-        await message.reactions.removeAll();
         await message.react(REACTIONS.ERROR);
     }
 });
@@ -732,9 +719,9 @@ function getThreatLabel(score) {
 }
 
 client.on('guildMemberAdd', async member => {
-    if (member.guild.id !== '1186251693122388010') return;
+    if (member.guild.id !== '970775928596746290') return;
 
-    const channel = await client.channels.fetch('1283574200090493020').catch(() => {});
+    const channel = await client.channels.fetch('1053759729526112306').catch(() => {});
     if (!channel) return console.log('No channel found');
 
     const threatAssessment = await calculateThreatLevel(member, client.cache.bannedUsers);
@@ -961,3 +948,154 @@ client.on('guildMemberUpdate', async function(oldMember, newMember) {
 
 	await client.modname(newMember);
 });
+
+const sticky = require('./Schemas.js/stickMessageSystem');
+
+client.on('messageCreate', async (message) => {
+    if (!message.guild || !message.channel) return;
+
+    var data = await sticky.find({ Guild: message.guild.id, Channel: message.channel.id});
+    if (data.length == 0) return;
+    if (message.author.bot) return;
+
+    await data.forEach(async value => {
+        if (!value.uniqueId) {
+            value.uniqueId = crypto.randomBytes(3).toString('hex').toUpperCase();
+            await value.save();
+        }
+
+        if (value.Count == value.Cap-1) {
+            if (value.LastMessageId) {
+                try {
+                    const previousMessage = await message.channel.messages.fetch(value.LastMessageId);
+                    if (previousMessage) await previousMessage.delete().catch(() => {});
+                } catch (error) {
+                    // Message might not exist anymore, ignore error
+                }
+            }
+
+            const embed = {
+                color: 0x2196f3,
+                description: `${value.Message}`,
+                footer: {
+                    text: `Sticky Message • ID: ${value.uniqueId}`
+                },
+                timestamp: new Date()
+            }
+
+            const newSticky = await message.channel.send({ embeds: [embed] });
+            value.LastMessageId = newSticky.id;
+            value.Count = 0;
+            await value.save();
+        } else {
+            value.Count++;
+            await value.save();
+        }
+    });
+});
+
+client.on('messageCreate', async (message) => {
+    if (message.author.bot) return;
+
+    const emojis = [
+        "👋",
+        "<a:catwave:1124733058214543494>",
+        "<a:hello:1089605823438798939>",
+        "<a:pepewave:1108966307862421584>",
+        "<:wave:1082265671326502942>",
+        "<a:welcome:1083191197553655828>",
+        "<a:welcome:1124234836916318298>",
+        "<a:welcome:1149717561395646555>",
+        "<a:wavePepe:1355626542172213399>",
+        "<a:wavey:1355626703480950885>"
+    ]
+
+    const randomEmoji = emojis[Math.floor(Math.random() * emojis.length)];
+
+    if (message.channel.id === '1079430450830921829') {
+        try {
+            await message.react(randomEmoji);
+        } catch (error) {
+            console.error('Failed to auto-react with wave emoji:', error);
+        }
+    }
+});
+
+// COUNTING
+
+const config2 = {
+    "goal": 2000,
+    "roles": ['1198108552238202880', '1198108657846583336'],
+    "countingChannel": '1364948666372329493'
+
+}
+
+client.on('messageCreate', async (message) => {
+    if (!config2.roles.some(role => message.member.roles.cache.has(role))) return;
+    if (message.content == '!start') {
+        if(db.get('started') == true) {
+            await message.reply('Counting was already started.');
+        }
+        if (!db.has('started') || db.get('started') == false) {
+            db.set('started', true);
+            db.set('cCount', 0)
+            db.set('lastUser', null);
+            await message.reply('Counting has started!');
+            return;
+    } 
+    } else if (message.content == '!stop') {
+        if (!db.has('started') || db.get('started') == false) {
+            await message.reply('Counting is currently not active.');
+        } else if (db.get('started') == true) {
+            db.set('started', false);
+            db.set('cCount', 0);
+            await message.reply('Counting was stopped and reset.')
+        }
+    } else if (message.content == '!pause') {
+        db.set('started', false);
+        await message.reply('Counting was paused and progress was saved.');
+    } else if (message.content == '!resume') {
+        db.set('started', true);
+        await message.reply('Counting is now active again.');
+    }
+});
+
+client.on('messageCreate', async (message) => { 
+    if (message.author.bot) return;
+    if (message.channel.id !== config2.countingChannel) return;
+    if (db.get('started') == false) return;
+    if (!/^\d/.test(message)) return;
+    const currentCount = db.get('cCount');
+    const args = message.content.split(' ');
+    const number = Number(args[0]);
+
+    if (isNaN(number)) {
+            const result = eval(args[0])
+            if (db.get('lastUser') == message.author.id) {
+                await message.react('♻️');
+                await message.react('❌');
+            } else if (result == currentCount + 1) {
+                await message.react('✅');
+                db.set('cCount', currentCount + 1)
+                db.set('lastUser', message.author.id)
+                return;
+            } else if (result !== currentCount + 1) {
+                await message.react('❌');
+                return;
+            }
+    } else if (!isNaN(number)) {     
+        if (db.get('lastUser') == message.author.id) {
+            await message.react('♻️');
+            await message.react('❌');
+            return;
+        } else if (number !== currentCount + 1) {
+            await message.react('❌');
+        } else if (number == currentCount + 1 && number == config2.goal){
+            await message.channel.send('# Congrats, the monthly goal has been reached! As a reward one of the staff members will start a pastebin giveaway as soon as someone is available. 🎉🎉🥳🥳')
+        }else if (number == currentCount + 1) {
+            await message.react('✅');
+            db.set('cCount', currentCount + 1)
+            db.set('lastUser', message.author.id)
+        }
+    }    
+})
